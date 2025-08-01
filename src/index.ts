@@ -118,6 +118,10 @@ function executarTesteHuffman(pixelData: number[], bmpData: bpm.BmpDecoder, base
     fs.writeFileSync(caminhoSaidaHuff, bufferFinalHuffman);
     const tamanhoComprimido = bufferFinalHuffman.length;
 
+    // Salva a árvore separadamente para referência
+    const caminhoArvore = path.join(resultsDirectory, `${baseOutputName}_huffman_tree.json`);
+    fs.writeFileSync(caminhoArvore, arvoreJson);
+
     // --- Descompressão ---
     const tempoInicioDescompressao = performance.now();
     const dadosDecodificados = Huffman.decode(encodedData, tree);
@@ -219,7 +223,72 @@ async function main() {
     console.log('✅ Análise concluída. Resultados Finais:');
     console.table(todosResultados);
 
+    const tabelaCurta = todosResultados.map(r => ({
+        Img     : r['Nome da Imagem'],
+        StartSizeBytes    : r['Tamanho Original (Bytes)'],
+        Alg     : r['Algoritmo'],
+        FinalSizeBytes    : r['Tamanho Comprimido (Bytes)'],
+        TaxaComp : r['Taxa de Compressão (%)'],
+        TcompMs : r['Tempo de Compressão (ms)'],
+        TdecompMs : r['Tempo de Descompressão (ms)']
+    }));
+
+    console.log('-'.repeat(60));
+    console.log('✅ Análise concluída. Resultados Finais:');
+    console.table(tabelaCurta);
+    
+
     salvarResultadosCSV(todosResultados);
+
+    calcularMediasPorAlgoritmo(todosResultados)
 }
 
 main();
+
+function calcularMediasPorAlgoritmo(resultados: ResultadoTeste[]) {
+  type Acumulado = {
+    origTotal: number;
+    compTotal: number;
+    tempoCompTotal: number;
+    tempoDecompTotal: number;
+    count: number;
+  };
+
+  const mapa = resultados.reduce<Record<'Huffman' | 'LZW', Acumulado>>((acc, r) => {
+    const alg = r['Algoritmo'];
+    if (!acc[alg]) {
+      acc[alg] = { origTotal: 0, compTotal: 0, tempoCompTotal: 0, tempoDecompTotal: 0, count: 0 };
+    }
+    acc[alg].origTotal       += r['Tamanho Original (Bytes)'];
+    acc[alg].compTotal       += r['Tamanho Comprimido (Bytes)'];
+    acc[alg].tempoCompTotal  += parseFloat(r['Tempo de Compressão (ms)']);
+    acc[alg].tempoDecompTotal+= parseFloat(r['Tempo de Descompressão (ms)']);
+    acc[alg].count++;
+    return acc;
+  }, {} as Record<'Huffman' | 'LZW', Acumulado>);
+
+  const medias = Object.entries(mapa).map(([alg, v]) => ({
+    Algoritmo: alg,
+    'Taxa de Compressão Média (%)': ((1 - v.compTotal / v.origTotal) * 100).toFixed(2), // MÉDIA PONDERADA
+    'Tempo Médio Compressão (ms)': (v.tempoCompTotal / v.count).toFixed(2),
+    'Tempo Médio Descompressão (ms)': (v.tempoDecompTotal / v.count).toFixed(2)
+  }));
+
+  console.log('\n📊  Médias gerais por algoritmo');
+  console.table(medias);
+  salvarMedias(medias);
+}
+
+function salvarMedias(medias: any[]): void {
+    try {
+        const campos = ['Algoritmo', 'Taxa de Compressão Média (%)', 'Tempo Médio Compressão (ms)', 'Tempo Médio Descompressão (ms)'];
+        const parser = new Parser({ fields: campos });
+        const csv = parser.parse(medias);
+        const caminhoSaida = path.join(__dirname, '..', 'resultados_medias_compressao.csv');
+        fs.writeFileSync(caminhoSaida, csv);
+        console.log(`\n💾 Médias salvas com sucesso em: ${caminhoSaida}`);
+    } catch (error) {
+        console.error('❌ Erro ao salvar as médias em CSV:', error);
+    }
+}
+
